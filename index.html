@@ -1,0 +1,99 @@
+
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Excel Data Analyzer</title>
+    <link rel="stylesheet" href="style.css">
+
+    <!-- Excel and CSV reading library -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+    <!-- Graph library -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+
+    <header>
+        <h1>Excel Data Analyzer</h1>
+        <p>Upload, select, analyze and visualize your data</p>
+    </header>
+
+    <main>
+        <section class="card">
+            <h2>1. Upload Excel File</h2>
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+            <button id="uploadBtn">Upload Excel</button>
+            <button id="sampleBtn" class="secondary">Load Sample Data</button>
+            <p id="uploadMessage">Upload an Excel or CSV file to begin.</p>
+        </section>
+
+        <section class="card">
+            <h2>2. Select Rows and Columns</h2>
+            <p>Rows means data rows, excluding the header row.</p>
+
+            <div class="selection">
+                <div>
+                    <label for="rowCount">Number of Rows</label>
+                    <input type="number" id="rowCount" min="1" max="5000" value="3">
+                </div>
+
+                <div>
+                    <label for="colCount">Number of Columns</label>
+                    <input type="number" id="colCount" min="1" max="100" value="4">
+                </div>
+            </div>
+
+            <button id="applySelectionBtn">Apply Selection</button>
+            <button id="createBtn" class="secondary">Create Manual Table</button>
+            <button id="addRowBtn" class="secondary">Add Row</button>
+            <button id="addColBtn" class="secondary">Add Column</button>
+        </section>
+
+        <section class="card">
+            <h2>3. Selected Data</h2>
+            <p id="tableMessage">Your selected data will appear here.</p>
+            <div id="tableArea" class="table-container"></div>
+            <button id="analyzeBtn">Analyze Data</button>
+        </section>
+
+        <section class="card">
+            <h2>4. Statistics</h2>
+            <div id="statsArea" class="stats-grid"></div>
+            <div id="summaryArea" class="table-container"></div>
+        </section>
+
+        <section class="card">
+            <h2>5. Graphs</h2>
+            <label for="columnSelect">Select numeric column:</label>
+            <select id="columnSelect">
+                <option value="">No numeric column</option>
+            </select>
+
+            <div class="charts">
+                <div class="chart-box">
+                    <h3>Bar Chart</h3>
+                    <canvas id="barChart"></canvas>
+                </div>
+
+                <div class="chart-box">
+                    <h3>Line Chart</h3>
+                    <canvas id="lineChart"></canvas>
+                </div>
+
+                <div class="chart-box">
+                    <h3>Average by Column</h3>
+                    <canvas id="avgChart"></canvas>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <p>Excel Data Analyzer </p>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>
