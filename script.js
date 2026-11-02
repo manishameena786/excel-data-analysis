@@ -1,618 +1,834 @@
 
+const MAX_ROWS = 500;
+const MAX_COLUMNS = 1000;
+
 let data = [];
-let uploadedData = null;
+let headers = [];
+let filteredData = null;
 
-let barChart = null;
-let lineChart = null;
-let avgChart = null;
+let undoStack = [];
+let redoStack = [];
 
-const rowInput = document.getElementById("rowCount");
-const colInput = document.getElementById("colCount");
-const fileInput = document.getElementById("fileInput");
+let charts = {};
+let selectedColumn = 0;
 
-const sampleData = [
-    ["Student", "Python", "Java", "DBMS"],
-    ["A", 80, 70, 90],
-    ["B", 60, 85, 75],
-    ["C", 90, 95, 80]
-];
+// -------------------- BASIC HELPERS --------------------
 
-// ---------- Upload Excel or CSV ----------
+function cloneData(value) {
+    return JSON.parse(JSON.stringify(value));
+}
 
-document.getElementById("uploadBtn").addEventListener("click", function () {
-    const file = fileInput.files[0];
+function getCurrentData() {
+    return filteredData === null ? data : filteredData;
+}
+
+function saveHistory() {
+    undoStack.push({
+        data: cloneData(data),
+        headers: cloneData(headers)
+    });
+
+    if (undoStack.length > 20) undoStack.shift();
+    redoStack = [];
+
+    updateUndoRedoButtons();
+}
+
+function updateUndoRedoButtons() {
+    document.getElementById("undoBtn").disabled = undoStack.length === 0;
+    document.getElementById("redoBtn").disabled = redoStack.length === 0;
+}
+
+function undo() {
+    if (!undoStack.length) return;
+
+    redoStack.push({
+        data: cloneData(data),
+        headers: cloneData(headers)
+    });
+
+    const previous = undoStack.pop();
+    data = previous.data;
+    headers = previous.headers;
+    filteredData = null;
+
+    refresh();
+    updateUndoRedoButtons();
+}
+
+function redo() {
+    if (!redoStack.length) return;
+
+    undoStack.push({
+        data: cloneData(data),
+        headers: cloneData(headers)
+    });
+
+    const next = redoStack.pop();
+    data = next.data;
+    headers = next.headers;
+    filteredData = null;
+
+    refresh();
+    updateUndoRedoButtons();
+}
+
+function getNumericValues(columnIndex) {
+    return getCurrentData()
+        .map(row => Number(row[columnIndex]))
+        .filter(value => Number.isFinite(value) && rowValueNotEmpty(value));
+}
+
+function rowValueNotEmpty(value) {
+    return value !== null && value !== undefined && value !== "";
+}
+
+function formatNumber(value) {
+    if (!Number.isFinite(value)) return "N/A";
+    return Number(value.toFixed(3)).toLocaleString();
+}
+
+function limitInputs() {
+    const rows = Math.max(
+        1,
+        Math.min(MAX_ROWS, parseInt(document.getElementById("rowCount").value) || 1)
+    );
+
+    const cols = Math.max(
+        1,
+        Math.min(MAX_COLUMNS, parseInt(document.getElementById("colCount").value) || 1)
+    );
+
+    document.getElementById("rowCount").value = rows;
+    document.getElementById("colCount").value = cols;
+
+    return { rows, cols };
+}
+
+// -------------------- SAMPLE DATA --------------------
+
+function loadSampleData() {
+    saveHistory();
+
+    headers = ["Name", "Age", "Marks", "Attendance", "Salary"];
+
+    data = [
+        ["Aman", 20, 85, 90, 25000],
+        ["Riya", 21, 92, 95, 30000],
+        ["Rahul", 19, 70, 80, 22000],
+        ["Priya", 22, 88, 85, 28000],
+        ["Karan", 20, 65, 75, 20000],
+        ["Neha", 21, 95, 98, 35000],
+        ["Arjun", 23, 78, 82, 26000],
+        ["Simran", 20, 82, 88, 27000],
+        ["Anjali", 22, 90, 93, 32000],
+        ["Vikas", 19, 60, 70, 18000]
+    ];
+
+    filteredData = null;
+    document.getElementById("uploadMessage").textContent = "Sample data loaded.";
+    refresh();
+}
+
+// -------------------- FILE UPLOAD --------------------
+
+document.getElementById("uploadBtn").addEventListener("click", () => {
+    const file = document.getElementById("fileInput").files[0];
 
     if (!file) {
-        alert("Please select an Excel or CSV file first.");
-        return;
-    }
-
-    if (file.size > 10 * 1024 * 1024) {
-        alert("File size must be 10 MB or less.");
+        alert("Please select an Excel or CSV file.");
         return;
     }
 
     const reader = new FileReader();
 
-    reader.onload = function (event) {
+    reader.onload = function(event) {
         try {
-            const workbook = XLSX.read(event.target.result, {
-                type: "array"
-            });
-
+            const workbook = XLSX.read(event.target.result, { type: "array" });
             const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
-            uploadedData = XLSX.utils.sheet_to_json(sheet, {
+            const sheetData = XLSX.utils.sheet_to_json(sheet, {
                 header: 1,
                 defval: ""
             });
 
-            if (uploadedData.length === 0) {
-                throw new Error("The selected sheet is empty.");
+            if (!sheetData.length) {
+                alert("The file is empty.");
+                return;
             }
 
-            const columnCount = uploadedData.reduce(function (max, row) {
-                return Math.max(max, row.length);
-            }, 0);
+            saveHistory();
 
-            if (uploadedData.length > 5001 || columnCount > 100) {
-                uploadedData = null;
-                throw new Error("Maximum allowed: 5000 data rows and 100 columns.");
-            }
+            const limits = limitInputs();
+
+            headers = sheetData[0]
+                .slice(0, limits.cols)
+                .map((value, index) => String(value || `Column ${index + 1}`));
+
+            data = sheetData
+                .slice(1, limits.rows + 1)
+                .map(row => {
+                    const selectedRow = row.slice(0, limits.cols);
+
+                    while (selectedRow.length < headers.length) {
+                        selectedRow.push("");
+                    }
+
+                    return selectedRow;
+                });
+
+            filteredData = null;
 
             document.getElementById("uploadMessage").textContent =
-                "File uploaded! Enter the rows and columns you want, then click Apply Selection.";
+                `Uploaded ${data.length} rows and ${headers.length} columns.`;
 
-            document.getElementById("tableMessage").textContent =
-                "The selected portion of your Excel sheet will appear here.";
-
+            refresh();
         } catch (error) {
-            document.getElementById("uploadMessage").textContent =
-                error.message || "Unable to read this file.";
+            alert("Unable to read file. Please check your Excel/CSV file.");
+            console.error(error);
         }
-    };
-
-    reader.onerror = function () {
-        alert("Unable to read the selected file.");
     };
 
     reader.readAsArrayBuffer(file);
 });
 
-// ---------- Apply selected rows and columns ----------
+// -------------------- APPLY ROW / COLUMN SELECTION --------------------
 
-document.getElementById("applySelectionBtn").addEventListener("click", function () {
-    if (!uploadedData || uploadedData.length === 0) {
-        alert("Please upload an Excel file or load sample data first.");
+document.getElementById("applySelectionBtn").addEventListener("click", () => {
+    if (!data.length) {
+        alert("Upload a file or load sample data first.");
         return;
     }
 
-    const rows = Number(rowInput.value);
-    const cols = Number(colInput.value);
+    const limits = limitInputs();
 
-    if (!Number.isInteger(rows) || rows < 1 || rows > 5000 ||
-        !Number.isInteger(cols) || cols < 1 || cols > 100) {
-        alert("Enter 1-5000 rows and 1-100 columns.");
-        return;
-    }
+    saveHistory();
 
-    const availableColumns = uploadedData.reduce(function (max, row) {
-        return Math.max(max, row.length);
-    }, 0);
+    data = data.slice(0, limits.rows);
 
-    if (cols > availableColumns) {
-        alert("The Excel sheet has only " + availableColumns + " columns.");
-        return;
-    }
+    headers = headers.slice(0, limits.cols);
 
-    // Select only the requested columns.
-    const selectedColumns = uploadedData.map(function (row) {
-        return row.slice(0, cols);
+    data = data.map(row => {
+        row = row.slice(0, limits.cols);
+
+        while (row.length < headers.length) {
+            row.push("");
+        }
+
+        return row;
     });
 
-    // Row 1 is the header; rows means data rows below the header.
-    data = selectedColumns.slice(0, rows + 1);
+    filteredData = null;
 
     document.getElementById("tableMessage").textContent =
-        "Showing " + Math.max(0, data.length - 1) +
-        " data rows and " + cols + " columns.";
+        `Showing ${data.length} rows and ${headers.length} columns.`;
 
-    displayTable();
-    analyzeData();
+    refresh();
 });
 
-// ---------- Load sample data ----------
+// -------------------- MANUAL TABLE --------------------
 
-document.getElementById("sampleBtn").addEventListener("click", function () {
-    uploadedData = sampleData.map(function (row) {
-        return [...row];
-    });
+document.getElementById("createBtn").addEventListener("click", () => {
+    const rows = Math.max(
+        1,
+        Math.min(MAX_ROWS, parseInt(document.getElementById("manualRows").value) || 1)
+    );
 
-    rowInput.value = 3;
-    colInput.value = 4;
+    const cols = Math.max(
+        1,
+        Math.min(MAX_COLUMNS, parseInt(document.getElementById("manualCols").value) || 1)
+    );
 
-    document.getElementById("uploadMessage").textContent =
-        "Sample data loaded. Change the selection and click Apply Selection if needed.";
+    saveHistory();
 
-    document.getElementById("applySelectionBtn").click();
+    headers = Array.from({ length: cols }, (_, i) => `Column ${i + 1}`);
+
+    data = Array.from({ length: rows }, () =>
+        Array(cols).fill("")
+    );
+
+    filteredData = null;
+    refresh();
 });
 
-// ---------- Create an empty manual table ----------
-
-document.getElementById("createBtn").addEventListener("click", function () {
-    const rows = Number(rowInput.value);
-    const cols = Number(colInput.value);
-
-    if (!Number.isInteger(rows) || rows < 1 || rows > 5000 ||
-        !Number.isInteger(cols) || cols < 1 || cols > 100) {
-        alert("Enter 1-5000 rows and 1-100 columns.");
-        return;
-    }
-
-    uploadedData = null;
-
-    data = [];
-
-    const headers = [];
-
-    for (let c = 0; c < cols; c++) {
-        headers.push("Column " + (c + 1));
-    }
-
-    data.push(headers);
-
-    for (let r = 0; r < rows; r++) {
-        data.push(Array(cols).fill(""));
-    }
-
-    document.getElementById("uploadMessage").textContent =
-        "Manual table created.";
-
-    document.getElementById("tableMessage").textContent =
-        "Enter your data in the editable cells.";
-
-    displayTable();
-    analyzeData();
-});
-
-// ---------- Display editable table ----------
+// -------------------- DISPLAY TABLE --------------------
 
 function displayTable() {
     const tableArea = document.getElementById("tableArea");
-    tableArea.innerHTML = "";
 
-    if (data.length === 0) {
-        tableArea.textContent = "No data available.";
+    if (!headers.length) {
+        tableArea.innerHTML = "<p>No data available.</p>";
         return;
     }
 
-    const table = document.createElement("table");
-    const thead = document.createElement("thead");
-    const tbody = document.createElement("tbody");
-    const headerRow = document.createElement("tr");
+    const currentData = getCurrentData();
 
-    data[0].forEach(function (heading) {
-        const th = document.createElement("th");
-        th.textContent = heading === "" ? "(blank header)" : heading;
-        headerRow.appendChild(th);
+    let html = "<table><thead><tr>";
+
+    headers.forEach((header, columnIndex) => {
+        html += `<th>${escapeHTML(header)}</th>`;
     });
 
-    thead.appendChild(headerRow);
+    html += "</tr></thead><tbody>";
 
-    for (let r = 1; r < data.length; r++) {
-        const tr = document.createElement("tr");
+    currentData.forEach((row, rowIndex) => {
+        html += "<tr>";
 
-        for (let c = 0; c < data[r].length; c++) {
-            const td = document.createElement("td");
-            const input = document.createElement("input");
+        headers.forEach((header, columnIndex) => {
+            const value = row[columnIndex] ?? "";
 
-            input.type = "text";
-            input.value = data[r][c] ?? "";
-            input.setAttribute("aria-label", "Row " + r + ", Column " + (c + 1));
+            html += `
+                <td>
+                    <input
+                        type="text"
+                        value="${escapeHTML(value)}"
+                        data-row="${rowIndex}"
+                        data-col="${columnIndex}"
+                        aria-label="Row ${rowIndex + 1}, Column ${columnIndex + 1}"
+                    >
+                </td>
+            `;
+        });
 
-            input.addEventListener("input", function () {
-                data[r][c] = input.value;
+        html += "</tr>";
+    });
+
+    html += "</tbody></table>";
+
+    tableArea.innerHTML = html;
+
+    tableArea.querySelectorAll("td input").forEach(input => {
+        input.addEventListener("change", function() {
+            saveHistory();
+
+            const rowIndex = Number(this.dataset.row);
+            const colIndex = Number(this.dataset.col);
+
+            if (filteredData !== null) {
+                filteredData[rowIndex][colIndex] = this.value;
+            } else {
+                data[rowIndex][colIndex] = this.value;
+            }
+
+            analyzeData();
+        });
+    });
+
+    updateDropdowns();
+}
+
+function escapeHTML(value) {
+    return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+}
+
+// -------------------- DROPDOWNS --------------------
+
+function updateDropdowns() {
+    const dropdownIds = [
+        "sortColumn",
+        "filterColumn",
+        "searchColumn",
+        "columnSelect"
+    ];
+
+    dropdownIds.forEach(id => {
+        const select = document.getElementById(id);
+
+        select.innerHTML = "";
+
+        headers.forEach((header, index) => {
+            const option = document.createElement("option");
+            option.value = index;
+            option.textContent = header;
+            select.appendChild(option);
+        });
+    });
+}
+
+// -------------------- ADD ROW / COLUMN --------------------
+
+document.getElementById("addRowBtn").addEventListener("click", () => {
+    if (data.length >= MAX_ROWS) {
+        alert("Maximum 500 rows allowed.");
+        return;
+    }
+
+    saveHistory();
+
+    data.push(Array(headers.length).fill(""));
+    filteredData = null;
+
+    refresh();
+});
+
+document.getElementById("addColBtn").addEventListener("click", () => {
+    if (headers.length >= MAX_COLUMNS) {
+        alert("Maximum 1000 columns allowed.");
+        return;
+    }
+
+    saveHistory();
+
+    headers.push(`Column ${headers.length + 1}`);
+
+    data.forEach(row => row.push(""));
+
+    filteredData = null;
+
+    refresh();
+});
+
+// -------------------- CLEAN EMPTY CELLS --------------------
+
+document.getElementById("cleanBtn").addEventListener("click", () => {
+    saveHistory();
+
+    data = data.map(row =>
+        row.map(value => value === null || value === undefined ? "" : value)
+    );
+
+    filteredData = null;
+
+    refresh();
+});
+
+// -------------------- REMOVE DUPLICATES --------------------
+
+document.getElementById("removeDuplicatesBtn").addEventListener("click", () => {
+    saveHistory();
+
+    const originalLength = data.length;
+
+    const seen = new Set();
+
+    data = data.filter(row => {
+        const key = JSON.stringify(row);
+
+        if (seen.has(key)) return false;
+
+        seen.add(key);
+        return true;
+    });
+
+    filteredData = null;
+
+    document.getElementById("tableMessage").textContent =
+        `${originalLength - data.length} duplicate rows removed.`;
+
+    refresh();
+});
+
+// -------------------- SORTING --------------------
+
+document.getElementById("sortBtn").addEventListener("click", () => {
+    const columnIndex = Number(document.getElementById("sortColumn").value);
+    const order = document.getElementById("sortOrder").value;
+
+    saveHistory();
+
+    data.sort((a, b) => {
+        const valueA = a[columnIndex] ?? "";
+        const valueB = b[columnIndex] ?? "";
+
+        const numA = Number(valueA);
+        const numB = Number(valueB);
+
+        let result;
+
+        if (valueA !== "" && valueB !== "" &&
+            Number.isFinite(numA) && Number.isFinite(numB)) {
+            result = numA - numB;
+        } else {
+            result = String(valueA).localeCompare(String(valueB));
+        }
+
+        return order === "asc" ? result : -result;
+    });
+
+    filteredData = null;
+    refresh();
+});
+
+// -------------------- FILTERING --------------------
+
+document.getElementById("filterBtn").addEventListener("click", () => {
+    const columnIndex = Number(document.getElementById("filterColumn").value);
+    const filterValue = document.getElementById("filterValue").value.toLowerCase();
+
+    filteredData = data.filter(row =>
+        String(row[columnIndex] ?? "").toLowerCase().includes(filterValue)
+    );
+
+    displayTable();
+    analyzeData();
+
+    document.getElementById("tableMessage").textContent =
+        `${filteredData.length} matching rows found.`;
+});
+
+document.getElementById("clearFilterBtn").addEventListener("click", () => {
+    filteredData = null;
+    refresh();
+});
+
+// -------------------- COLUMN SEARCH --------------------
+
+document.getElementById("searchColumnBtn").addEventListener("click", () => {
+    const columnIndex = Number(document.getElementById("searchColumn").value);
+    const searchValue = document.getElementById("searchValue").value.toLowerCase();
+
+    const results = getCurrentData().filter(row =>
+        String(row[columnIndex] ?? "").toLowerCase().includes(searchValue)
+    );
+
+    let html = `<p><b>${results.length}</b> matching records found.</p>`;
+
+    if (results.length) {
+        html += "<div class='table-area'><table><thead><tr>";
+
+        headers.forEach(header => {
+            html += `<th>${escapeHTML(header)}</th>`;
+        });
+
+        html += "</tr></thead><tbody>";
+
+        results.slice(0, 100).forEach(row => {
+            html += "<tr>";
+
+            headers.forEach((header, index) => {
+                html += `<td>${escapeHTML(row[index] ?? "")}</td>`;
             });
 
-            td.appendChild(input);
-            tr.appendChild(td);
-        }
+            html += "</tr>";
+        });
 
-        tbody.appendChild(tr);
+        html += "</tbody></table></div>";
     }
 
-    table.appendChild(thead);
-    table.appendChild(tbody);
-    tableArea.appendChild(table);
-}
-
-// ---------- Add a row ----------
-
-document.getElementById("addRowBtn").addEventListener("click", function () {
-    if (data.length === 0) {
-        alert("Load data or create a table first.");
-        return;
-    }
-
-    if (data.length >= 5001) {
-        alert("Maximum 5000 data rows allowed.");
-        return;
-    }
-
-    data.push(Array(data[0].length).fill(""));
-
-    rowInput.value = data.length - 1;
-
-    displayTable();
-    analyzeData();
+    document.getElementById("columnSearchResult").innerHTML = html;
 });
 
-// ---------- Add a column ----------
+// -------------------- STATISTICS --------------------
 
-document.getElementById("addColBtn").addEventListener("click", function () {
-    if (data.length === 0) {
-        alert("Load data or create a table first.");
-        return;
-    }
+function calculateMode(values) {
+    if (!values.length) return "N/A";
 
-    if (data[0].length >= 100) {
-        alert("Maximum 100 columns allowed.");
-        return;
-    }
+    const frequency = {};
 
-    const newColumn = data[0].length + 1;
-    data[0].push("Column " + newColumn);
-
-    for (let r = 1; r < data.length; r++) {
-        data[r].push("");
-    }
-
-    colInput.value = newColumn;
-
-    displayTable();
-    analyzeData();
-});
-
-// ---------- Analyze button ----------
-
-document.getElementById("analyzeBtn").addEventListener("click", function () {
-    analyzeData();
-});
-
-// ---------- Get numeric values from a column ----------
-
-function getColumnNumbers(columnIndex) {
-    const values = [];
-
-    for (let r = 1; r < data.length; r++) {
-        const value = data[r][columnIndex];
-
-        if (value === "" || value === null || value === undefined) {
-            continue;
-        }
-
-        const number = Number(value);
-
-        if (Number.isFinite(number)) {
-            values.push(number);
-        }
-    }
-
-    return values;
-}
-
-// ---------- Calculate statistics ----------
-
-function getStatistics(values) {
-    if (values.length === 0) {
-        return null;
-    }
-
-    const sorted = [...values].sort(function (a, b) {
-        return a - b;
+    values.forEach(value => {
+        frequency[value] = (frequency[value] || 0) + 1;
     });
 
-    const count = values.length;
+    const maxFrequency = Math.max(...Object.values(frequency));
+
+    return Object.keys(frequency)
+        .filter(value => frequency[value] === maxFrequency)
+        .join(", ");
+}
+
+function analyzeData() {
+    const columnIndex = Number(document.getElementById("columnSelect").value);
+
+    if (headers.length === 0) return;
+
+    const values = getNumericValues(columnIndex);
+
+    if (!values.length) {
+        document.getElementById("statsArea").innerHTML =
+            "<p>No numeric data found in this column.</p>";
+
+        document.getElementById("insightsArea").innerHTML = "";
+        document.getElementById("summaryArea").innerHTML = "";
+
+        drawCharts([]);
+        return;
+    }
+
+    const sorted = [...values].sort((a, b) => a - b);
+
     const sum = values.reduce((total, value) => total + value, 0);
-    const mean = sum / count;
+    const mean = sum / values.length;
 
-    let median;
+    const median = sorted.length % 2 === 0
+        ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+        : sorted[Math.floor(sorted.length / 2)];
 
-    if (count % 2 === 0) {
-        median = (sorted[count / 2 - 1] + sorted[count / 2]) / 2;
-    } else {
-        median = sorted[Math.floor(count / 2)];
-    }
-
-    const frequencies = {};
-
-    values.forEach(function (value) {
-        frequencies[value] = (frequencies[value] || 0) + 1;
-    });
-
-    const highestFrequency = Math.max(...Object.values(frequencies));
-
-    const modes = Object.keys(frequencies)
-        .filter(key => frequencies[key] === highestFrequency)
-        .map(Number);
-
-    const mode = highestFrequency === 1
-        ? "No mode"
-        : modes.join(", ");
-
-    const min = Math.min(...values);
-    const max = Math.max(...values);
-
-    const variance = values.reduce(function (total, value) {
-        return total + Math.pow(value - mean, 2);
-    }, 0) / count;
+    const variance = values.reduce(
+        (total, value) => total + Math.pow(value - mean, 2), 0
+    ) / values.length;
 
     const standardDeviation = Math.sqrt(variance);
 
-    return {
-        count,
-        sum,
-        mean,
-        median,
-        mode,
-        min,
-        max,
-        variance,
-        standardDeviation
+    const stats = {
+        Count: values.length,
+        Sum: sum,
+        Mean: mean,
+        Median: median,
+        Mode: calculateMode(values),
+        Minimum: Math.min(...values),
+        Maximum: Math.max(...values),
+        Variance: variance,
+        "Standard Deviation": standardDeviation
     };
-}
 
-// ---------- Main analysis ----------
+    let html = "";
 
-function analyzeData() {
-    const statsArea = document.getElementById("statsArea");
-    const summaryArea = document.getElementById("summaryArea");
-    const columnSelect = document.getElementById("columnSelect");
-
-    statsArea.innerHTML = "";
-    summaryArea.innerHTML = "";
-
-    if (data.length < 2 || data[0].length === 0) {
-        statsArea.textContent = "Add at least one data row to analyze.";
-        updateColumnOptions([]);
-        destroyCharts();
-        return;
-    }
-
-    const numericColumns = [];
-
-    for (let c = 0; c < data[0].length; c++) {
-        const values = getColumnNumbers(c);
-
-        if (values.length > 0) {
-            numericColumns.push({
-                index: c,
-                name: String(data[0][c] || "Column " + (c + 1)),
-                values: values,
-                stats: getStatistics(values)
-            });
-        }
-    }
-
-    if (numericColumns.length === 0) {
-        statsArea.textContent = "No numeric data found. Enter numbers in the table.";
-        summaryArea.textContent = "";
-        updateColumnOptions([]);
-        destroyCharts();
-        return;
-    }
-
-    const selectedIndex = Number(columnSelect.value);
-    const chosen = numericColumns.find(item => item.index === selectedIndex)
-        || numericColumns[0];
-
-    // Show statistics for the selected numeric column.
-    const s = chosen.stats;
-
-    const cards = [
-        ["Column", chosen.name],
-        ["Count", s.count],
-        ["Sum", s.sum],
-        ["Mean / Average", s.mean.toFixed(2)],
-        ["Median", s.median],
-        ["Mode", s.mode],
-        ["Minimum", s.min],
-        ["Maximum", s.max],
-        ["Variance", s.variance.toFixed(2)],
-        ["Standard Deviation", s.standardDeviation.toFixed(2)]
-    ];
-
-    cards.forEach(function (item) {
-        const card = document.createElement("div");
-        card.className = "stat-card";
-
-        const heading = document.createElement("h3");
-        heading.textContent = item[0];
-
-        const value = document.createElement("p");
-        value.textContent = item[1];
-
-        card.appendChild(heading);
-        card.appendChild(value);
-        statsArea.appendChild(card);
+    Object.entries(stats).forEach(([name, value]) => {
+        html += `
+            <div class="stat-box">
+                <h4>${name}</h4>
+                <p>${typeof value === "number" ? formatNumber(value) : escapeHTML(value)}</p>
+            </div>
+        `;
     });
 
-    // Summary table for all numeric columns.
-    const summaryTable = document.createElement("table");
-    summaryTable.innerHTML = `
-        <thead>
-            <tr>
-                <th>Column</th>
-                <th>Count</th>
-                <th>Mean</th>
-                <th>Median</th>
-                <th>Minimum</th>
-                <th>Maximum</th>
-                <th>Std. Deviation</th>
-            </tr>
-        </thead>
+    document.getElementById("statsArea").innerHTML = html;
+
+    document.getElementById("insightsArea").innerHTML = `
+        <h3>💡 Automatic Insights</h3>
+        <p>• The selected column is <b>${escapeHTML(headers[columnIndex])}</b>.</p>
+        <p>• Average value is <b>${formatNumber(mean)}</b>.</p>
+        <p>• Maximum value is <b>${formatNumber(Math.max(...values))}</b>.</p>
+        <p>• Minimum value is <b>${formatNumber(Math.min(...values))}</b>.</p>
+        <p>• Standard deviation is <b>${formatNumber(standardDeviation)}</b>.</p>
+        <p>• ${values.length} numeric values were analyzed.</p>
     `;
 
-    const summaryBody = document.createElement("tbody");
-
-    numericColumns.forEach(function (item) {
-        const row = document.createElement("tr");
-
-        [
-            item.name,
-            item.stats.count,
-            item.stats.mean.toFixed(2),
-            item.stats.median,
-            item.stats.min,
-            item.stats.max,
-            item.stats.standardDeviation.toFixed(2)
-        ].forEach(function (value) {
-            const td = document.createElement("td");
-            td.textContent = value;
-            row.appendChild(td);
-        });
-
-        summaryBody.appendChild(row);
-    });
-
-    summaryTable.appendChild(summaryBody);
-    summaryArea.appendChild(summaryTable);
-
-    updateColumnOptions(numericColumns);
-    drawSelectedCharts(chosen);
-    drawAverageChart(numericColumns);
+    createSummaryTable();
+    drawCharts(values);
 }
 
-// ---------- Update numeric column dropdown ----------
+document.getElementById("analyzeBtn").addEventListener("click", analyzeData);
 
-function updateColumnOptions(numericColumns) {
-    const select = document.getElementById("columnSelect");
-    const oldValue = select.value;
+// -------------------- SUMMARY TABLE --------------------
 
-    select.innerHTML = "";
+function createSummaryTable() {
+    let html = "<h3>📋 Column Summary</h3><div class='table-area'><table>";
+    html += "<thead><tr><th>Column</th><th>Count</th><th>Numeric Count</th><th>Sum</th><th>Mean</th></tr></thead><tbody>";
 
-    if (numericColumns.length === 0) {
-        const option = document.createElement("option");
-        option.value = "";
-        option.textContent = "No numeric column";
-        select.appendChild(option);
+    headers.forEach((header, index) => {
+        const values = getNumericValues(index);
+        const sum = values.reduce((total, value) => total + value, 0);
+        const mean = values.length ? sum / values.length : 0;
+
+        html += `
+            <tr>
+                <td>${escapeHTML(header)}</td>
+                <td>${getCurrentData().length}</td>
+                <td>${values.length}</td>
+                <td>${formatNumber(sum)}</td>
+                <td>${formatNumber(mean)}</td>
+            </tr>
+        `;
+    });
+
+    html += "</tbody></table></div>";
+
+    document.getElementById("summaryArea").innerHTML = html;
+}
+
+// -------------------- CHARTS --------------------
+
+function drawCharts(values) {
+    Object.values(charts).forEach(chart => chart.destroy());
+    charts = {};
+
+    if (!values.length) return;
+
+    const labels = values.map((value, index) => `Record ${index + 1}`);
+
+    const chartData = {
+        labels,
+        datasets: [{
+            label: headers[Number(document.getElementById("columnSelect").value)],
+            data: values,
+            borderWidth: 2
+        }]
+    };
+
+    const createChart = (id, type, data, options = {}) => {
+        const ctx = document.getElementById(id);
+
+        charts[id] = new Chart(ctx, {
+            type,
+            data: cloneData(data),
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: true }
+                },
+                ...options
+            }
+        });
+    };
+
+    createChart("barChart", "bar", chartData);
+
+    createChart("lineChart", "line", chartData);
+
+    createChart("avgChart", "bar", {
+        labels: ["Mean", "Median", "Minimum", "Maximum"],
+        datasets: [{
+            label: "Statistical Values",
+            data: [
+                values.reduce((a, b) => a + b, 0) / values.length,
+                [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)],
+                Math.min(...values),
+                Math.max(...values)
+            ]
+        }]
+    });
+
+    const frequency = {};
+
+    values.forEach(value => {
+        frequency[value] = (frequency[value] || 0) + 1;
+    });
+
+    const uniqueLabels = Object.keys(frequency).slice(0, 20);
+    const uniqueValues = uniqueLabels.map(label => frequency[label]);
+
+    createChart("pieChart", "pie", {
+        labels: uniqueLabels,
+        datasets: [{ label: "Frequency", data: uniqueValues }]
+    });
+
+    createChart("doughnutChart", "doughnut", {
+        labels: uniqueLabels,
+        datasets: [{ label: "Frequency", data: uniqueValues }]
+    });
+
+    createChart("scatterChart", "scatter", {
+        datasets: [{
+            label: "Scatter Plot",
+            data: values.map((value, index) => ({ x: index + 1, y: value }))
+        }]
+    });
+
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    const binCount = 10;
+    const binSize = (max - min) / binCount || 1;
+
+    const bins = Array(binCount).fill(0);
+
+    values.forEach(value => {
+        let binIndex = Math.floor((value - min) / binSize);
+        binIndex = Math.min(binCount - 1, Math.max(0, binIndex));
+        bins[binIndex]++;
+    });
+
+    createChart("histogramChart", "bar", {
+        labels: bins.map((value, index) => {
+            const start = min + index * binSize;
+            const end = start + binSize;
+            return `${formatNumber(start)} - ${formatNumber(end)}`;
+        }),
+        datasets: [{
+            label: "Frequency",
+            data: bins
+        }]
+    });
+}
+
+// -------------------- EXCEL DOWNLOAD --------------------
+
+document.getElementById("excelDownloadBtn").addEventListener("click", () => {
+    if (!data.length) {
+        alert("No data to download.");
         return;
     }
 
-    numericColumns.forEach(function (item) {
-        const option = document.createElement("option");
-        option.value = item.index;
-        option.textContent = item.name;
-        select.appendChild(option);
-    });
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    const workbook = XLSX.utils.book_new();
 
-    const oldOptionExists = numericColumns.some(
-        item => String(item.index) === oldValue
-    );
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Analyzed Data");
 
-    if (oldOptionExists) {
-        select.value = oldValue;
-    } else {
-        select.value = String(numericColumns[0].index);
-    }
-}
-
-// ---------- Redraw when a different column is selected ----------
-
-document.getElementById("columnSelect").addEventListener("change", function () {
-    analyzeData();
+    XLSX.writeFile(workbook, "Excel_Data_Analyzer.xlsx");
 });
 
-// ---------- Destroy old graphs ----------
+// -------------------- CSV DOWNLOAD --------------------
 
-function destroyCharts() {
-    if (barChart) {
-        barChart.destroy();
-        barChart = null;
+document.getElementById("csvDownloadBtn").addEventListener("click", () => {
+    if (!data.length) {
+        alert("No data to download.");
+        return;
     }
 
-    if (lineChart) {
-        lineChart.destroy();
-        lineChart = null;
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+
+    const csv = XLSX.utils.sheet_to_csv(worksheet);
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "Excel_Data_Analyzer.csv";
+    link.click();
+
+    URL.revokeObjectURL(url);
+});
+
+// -------------------- PDF REPORT --------------------
+
+document.getElementById("pdfReportBtn").addEventListener("click", () => {
+    if (!data.length) {
+        alert("No data to export.");
+        return;
     }
 
-    if (avgChart) {
-        avgChart.destroy();
-        avgChart = null;
-    }
-}
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF("landscape");
 
-// ---------- Draw bar and line charts ----------
+    pdf.text("Excel Data Analyzer Report", 14, 15);
 
-function drawSelectedCharts(chosen) {
-    if (barChart) barChart.destroy();
-    if (lineChart) lineChart.destroy();
+    pdf.text(`Rows: ${data.length} | Columns: ${headers.length}`, 14, 22);
 
-    const values = chosen.values;
-
-    const labels = [];
-
-    for (let i = 1; i < data.length; i++) {
-        labels.push(String(data[i][0] || "Row " + i));
-    }
-
-    const chartLabels = values.map(function (_, index) {
-        return labels[index] || "Row " + (index + 1);
-    });
-
-    barChart = new Chart(document.getElementById("barChart"), {
-        type: "bar",
-        data: {
-            labels: chartLabels,
-            datasets: [{
-                label: chosen.name,
-                data: values
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true
+    pdf.autoTable({
+        head: [headers.slice(0, 10)],
+        body: data.slice(0, 100).map(row => row.slice(0, 10)),
+        startY: 30,
+        styles: {
+            fontSize: 7
         }
     });
 
-    lineChart = new Chart(document.getElementById("lineChart"), {
-        type: "line",
-        data: {
-            labels: chartLabels,
-            datasets: [{
-                label: chosen.name,
-                data: values,
-                tension: 0.2
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true
-        }
-    });
+    pdf.save("Excel_Data_Analyzer_Report.pdf");
+});
+
+// -------------------- DARK MODE --------------------
+
+document.getElementById("darkModeBtn").addEventListener("click", () => {
+    document.body.classList.toggle("dark");
+
+    const isDark = document.body.classList.contains("dark");
+
+    document.getElementById("darkModeBtn").textContent =
+        isDark ? "☀️ Light Mode" : "🌙 Dark Mode";
+});
+
+// -------------------- UNDO / REDO BUTTONS --------------------
+
+document.getElementById("undoBtn").addEventListener("click", undo);
+document.getElementById("redoBtn").addEventListener("click", redo);
+
+// -------------------- REFRESH --------------------
+
+function refresh() {
+    displayTable();
+    analyzeData();
+    updateUndoRedoButtons();
 }
 
-// ---------- Average chart for numeric columns ----------
+// -------------------- INITIAL LOAD --------------------
 
-function drawAverageChart(numericColumns) {
-    if (avgChart) avgChart.destroy();
+document.getElementById("sampleBtn").addEventListener("click", loadSampleData);
 
-    avgChart = new Chart(document.getElementById("avgChart"), {
-        type: "bar",
-        data: {
-            labels: numericColumns.map(item => item.name),
-            datasets: [{
-                label: "Average",
-                data: numericColumns.map(item => item.stats.mean)
-            }]
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: true
-        }
-    });
-}
-
-// ---------- Start with sample data ----------
-
-document.getElementById("sampleBtn").click();
+loadSampleData();
