@@ -7,93 +7,139 @@
     <title>Excel Data Analyzer</title>
     <link rel="stylesheet" href="style.css">
 
-    <!-- Excel and CSV reading library -->
+    <!-- Excel / CSV -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
-    <!-- Graph library -->
+    <!-- Charts -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.5.31/jspdf.plugin.autotable.min.js"></script>
 </head>
+
 <body>
+<header class="topbar">
+    <div>
+        <h1>📊 Excel Data Analyzer</h1>
+        <p>Upload, clean, analyze and visualize your data</p>
+    </div>
+    <button id="darkModeBtn">🌙 Dark Mode</button>
+</header>
 
-    <header>
-        <h1>Excel Data Analyzer</h1>
-        <p>Upload, select, analyze and visualize your data</p>
-    </header>
+<main class="container">
 
-    <main>
-        <section class="card">
-            <h2>1. Upload Excel File</h2>
-            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
-            <button id="uploadBtn">Upload Excel</button>
-            <button id="sampleBtn" class="secondary">Load Sample Data</button>
-            <p id="uploadMessage">Upload an Excel or CSV file to begin.</p>
-        </section>
+    <section class="card">
+        <h2>📁 Upload Excel / CSV</h2>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv">
+        <button id="uploadBtn">Upload File</button>
+        <button id="sampleBtn">Load Sample Data</button>
+        <p id="uploadMessage"></p>
 
-        <section class="card">
-            <h2>2. Select Rows and Columns</h2>
-            <p>Rows means data rows, excluding the header row.</p>
+        <div class="input-grid">
+            <label>
+                Rows (Maximum 500)
+                <input type="number" id="rowCount" min="1" max="500" value="10">
+            </label>
 
-            <div class="selection">
-                <div>
-                    <label for="rowCount">Number of Rows</label>
-                    <input type="number" id="rowCount" min="1" max="5000" value="3">
-                </div>
+            <label>
+                Columns (Maximum 1000)
+                <input type="number" id="colCount" min="1" max="1000" value="5">
+            </label>
+        </div>
 
-                <div>
-                    <label for="colCount">Number of Columns</label>
-                    <input type="number" id="colCount" min="1" max="100" value="4">
-                </div>
-            </div>
+        <button id="applySelectionBtn">Apply Row / Column Selection</button>
+        <p id="tableMessage"></p>
+    </section>
 
-            <button id="applySelectionBtn">Apply Selection</button>
-            <button id="createBtn" class="secondary">Create Manual Table</button>
-            <button id="addRowBtn" class="secondary">Add Row</button>
-            <button id="addColBtn" class="secondary">Add Column</button>
-        </section>
+    <section class="card">
+        <h2>✍️ Manual Data Entry</h2>
+        <div class="input-grid">
+            <label>
+                Rows
+                <input type="number" id="manualRows" min="1" max="500" value="5">
+            </label>
+            <label>
+                Columns
+                <input type="number" id="manualCols" min="1" max="1000" value="5">
+            </label>
+        </div>
+        <button id="createBtn">Create Table</button>
+    </section>
 
-        <section class="card">
-            <h2>3. Selected Data</h2>
-            <p id="tableMessage">Your selected data will appear here.</p>
-            <div id="tableArea" class="table-container"></div>
-            <button id="analyzeBtn">Analyze Data</button>
-        </section>
+    <section class="card">
+        <h2>🧹 Data Management</h2>
 
-        <section class="card">
-            <h2>4. Statistics</h2>
-            <div id="statsArea" class="stats-grid"></div>
-            <div id="summaryArea" class="table-container"></div>
-        </section>
+        <div class="toolbar">
+            <button id="addRowBtn">+ Add Row</button>
+            <button id="addColBtn">+ Add Column</button>
+            <button id="undoBtn">↶ Undo</button>
+            <button id="redoBtn">↷ Redo</button>
+            <button id="cleanBtn">Clean Empty Cells</button>
+            <button id="removeDuplicatesBtn">Remove Duplicates</button>
+        </div>
 
-        <section class="card">
-            <h2>5. Graphs</h2>
-            <label for="columnSelect">Select numeric column:</label>
-            <select id="columnSelect">
-                <option value="">No numeric column</option>
+        <div class="toolbar">
+            <select id="sortColumn"></select>
+            <select id="sortOrder">
+                <option value="asc">Ascending</option>
+                <option value="desc">Descending</option>
             </select>
+            <button id="sortBtn">Sort</button>
+        </div>
 
-            <div class="charts">
-                <div class="chart-box">
-                    <h3>Bar Chart</h3>
-                    <canvas id="barChart"></canvas>
-                </div>
+        <div class="toolbar">
+            <select id="filterColumn"></select>
+            <input type="text" id="filterValue" placeholder="Filter value">
+            <button id="filterBtn">Apply Filter</button>
+            <button id="clearFilterBtn">Clear Filter</button>
+        </div>
 
-                <div class="chart-box">
-                    <h3>Line Chart</h3>
-                    <canvas id="lineChart"></canvas>
-                </div>
+        <div class="toolbar">
+            <button id="excelDownloadBtn">Download Excel</button>
+            <button id="csvDownloadBtn">Download CSV</button>
+            <button id="pdfReportBtn">Download PDF Report</button>
+        </div>
 
-                <div class="chart-box">
-                    <h3>Average by Column</h3>
-                    <canvas id="avgChart"></canvas>
-                </div>
-            </div>
-        </section>
-    </main>
+        <div id="tableArea" class="table-area"></div>
+    </section>
 
-    <footer>
-        <p>Excel Data Analyzer </p>
-    </footer>
+    <section class="card">
+        <h2>🔎 Column Search</h2>
+        <div class="toolbar">
+            <select id="searchColumn"></select>
+            <input type="text" id="searchValue" placeholder="Enter search value">
+            <button id="searchColumnBtn">Search</button>
+        </div>
+        <div id="columnSearchResult"></div>
+    </section>
 
-    <script src="script.js"></script>
+    <section class="card">
+        <h2>📈 Statistical Analysis</h2>
+        <div class="toolbar">
+            <select id="columnSelect"></select>
+            <button id="analyzeBtn">Analyze Data</button>
+        </div>
+        <div id="statsArea" class="stats-grid"></div>
+        <div id="insightsArea"></div>
+        <div id="summaryArea"></div>
+    </section>
+
+    <section class="card">
+        <h2>📊 Data Visualization</h2>
+        <div class="charts-grid">
+            <div class="chart-box"><canvas id="barChart"></canvas></div>
+            <div class="chart-box"><canvas id="lineChart"></canvas></div>
+            <div class="chart-box"><canvas id="avgChart"></canvas></div>
+            <div class="chart-box"><canvas id="pieChart"></canvas></div>
+            <div class="chart-box"><canvas id="doughnutChart"></canvas></div>
+            <div class="chart-box"><canvas id="scatterChart"></canvas></div>
+            <div class="chart-box"><canvas id="histogramChart"></canvas></div>
+        </div>
+    </section>
+
+</main>
+
+<script src="script.js"></script>
 </body>
 </html>
