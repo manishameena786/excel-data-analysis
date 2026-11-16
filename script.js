@@ -1,1198 +1,1328 @@
 
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&display=swap');
-
-:root {
-  --green: #087f4b;
-  --green-dark: #05643b;
-  --green-light: #e8f5ed;
-  --ink: #17251e;
-  --muted: #718078;
-  --surface: #ffffff;
-  --background: #f7faf7;
-  --border: #e5ece7;
-  --shadow: 0 18px 55px rgba(27, 64, 43, .08);
-}
+// ============================================
+// EXCEL ANALYTICS - COMPLETE JAVASCRIPT
+// Maximum: 1000 rows x 500 columns
+// Four charts with real category labels
+// ============================================
 
-* { box-sizing: border-box; }
+const MAX_ROWS = 1000;
+const MAX_COLUMNS = 500;
 
-html {
-  scroll-behavior: smooth;
-}
+const PREVIEW_ROWS = 100;
+const PREVIEW_COLUMNS = 30;
 
-body {
-  margin: 0;
-  background: var(--background);
-  color: var(--ink);
-  font-family: 'DM Sans', sans-serif;
-  overflow-x: hidden;
-  transition: background .25s, color .25s;
-}
+let data = [];
+let headers = [];
+let filteredIndexes = null;
 
-button, input, select {
-  font: inherit;
-}
+let undoStack = [];
+let redoStack = [];
+let charts = {};
 
-button, a {
-  -webkit-tap-highlight-color: transparent;
-}
+// ============================================
+// HELPER FUNCTIONS
+// ============================================
 
-a {
-  color: inherit;
-  text-decoration: none;
-}
+const $ = id => document.getElementById(id);
 
-button {
-  cursor: pointer;
+function cloneData(value) {
+    return JSON.parse(JSON.stringify(value));
 }
 
-.section-shell {
-  width: min(1160px, calc(100% - 48px));
-  margin-inline: auto;
+function escapeHTML(value) {
+    return String(value ?? "")
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
 }
 
-/* HEADER */
-
-.site-header {
-  min-height: 78px;
-  padding: 0 max(24px, calc((100% - 1160px) / 2));
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 24px;
-  background: rgba(255,255,255,.88);
-  border-bottom: 1px solid rgba(225,235,227,.8);
-  backdrop-filter: blur(18px);
-  position: sticky;
-  top: 0;
-  z-index: 50;
+function showMessage(id, message) {
+    const element = $(id);
+    if (element) element.textContent = message;
 }
 
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  flex-shrink: 0;
-}
+function parseNumber(value) {
+    if (value === null || value === undefined || value === "") {
+        return null;
+    }
 
-.brand-mark {
-  width: 38px;
-  height: 38px;
-  border-radius: 12px;
-  background: var(--green);
-  color: white;
-  display: grid;
-  place-items: center;
-  font-family: Manrope, sans-serif;
-  font-weight: 800;
-}
+    if (typeof value === "number") {
+        return Number.isFinite(value) ? value : null;
+    }
 
-.brand-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 1px;
-}
+    const cleaned = String(value)
+        .replace(/,/g, "")
+        .replace(/[₹$€£%]/g, "")
+        .trim();
 
-.brand-copy strong {
-  font: 800 16px Manrope, sans-serif;
-  letter-spacing: -.5px;
-}
+    if (!cleaned) return null;
 
-.brand-copy strong span {
-  color: var(--green);
+    const number = Number(cleaned);
+    return Number.isFinite(number) ? number : null;
 }
 
-.brand-copy small {
-  color: #8a9890;
-  font-size: 8px;
-  letter-spacing: 1.7px;
-  font-weight: 700;
-}
+function formatNumber(value) {
+    if (!Number.isFinite(value)) return "—";
 
-.main-nav {
-  display: flex;
-  align-items: center;
-  gap: 28px;
+    return Number(value.toFixed(2)).toLocaleString();
 }
 
-.main-nav a {
-  color: #64736a;
-  font-size: 12px;
-  font-weight: 600;
-  transition: .2s;
-}
+function getCurrentIndexes() {
+    if (filteredIndexes === null) {
+        return data.map((_, index) => index);
+    }
 
-.main-nav a:hover {
-  color: var(--green);
+    return filteredIndexes;
 }
 
-.theme-toggle {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  border: 1px solid var(--border);
-  background: white;
-  color: #53645a;
-  padding: 9px 13px;
-  border-radius: 30px;
-  font-size: 11px;
-  font-weight: 700;
+function getCurrentData() {
+    return getCurrentIndexes().map(index => data[index]);
 }
 
-/* HERO */
-
-.hero {
-  min-height: 550px;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  align-items: center;
-  gap: 30px;
-  padding-top: 45px;
-  padding-bottom: 55px;
+function getNumericValues(columnIndex) {
+    return getCurrentData()
+        .map(row => parseNumber(row[columnIndex]))
+        .filter(value => value !== null);
 }
 
-.eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: var(--green);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 1.8px;
-}
+function getFirstNumericColumn() {
+    for (let column = 0; column < headers.length; column++) {
+        const values = data
+            .slice(0, 50)
+            .map(row => parseNumber(row[column]))
+            .filter(value => value !== null);
 
-.hero h1 {
-  font: 800 clamp(42px, 5vw, 62px)/1.08 Manrope, sans-serif;
-  letter-spacing: -3px;
-  margin: 22px 0 18px;
-}
+        if (values.length > 0) return column;
+    }
 
-.hero h1 span,
-.section-heading h2 span,
-.closing-cta h2 span {
-  color: var(--green);
+    return 0;
 }
 
-.hero-description {
-  color: var(--muted);
-  max-width: 460px;
-  line-height: 1.8;
-  font-size: 14px;
-}
+function getFirstCategoryColumn() {
+    for (let column = 0; column < headers.length; column++) {
+        const values = data
+            .slice(0, 50)
+            .map(row => row[column])
+            .filter(value => value !== "" && value !== null && value !== undefined);
 
-.hero-actions {
-  display: flex;
-  align-items: center;
-  gap: 25px;
-  margin-top: 30px;
-}
+        const numericCount = values.filter(value => parseNumber(value) !== null).length;
 
-.hero-proof {
-  margin-top: 35px;
-  color: #849087;
-  font-size: 10px;
-}
+        if (values.length && numericCount < values.length) {
+            return column;
+        }
+    }
 
-.hero-visual {
-  min-height: 390px;
-  position: relative;
-  display: grid;
-  place-items: center;
+    return 0;
 }
 
-.dashboard-preview {
-  width: min(440px, 90%);
-  border-radius: 18px;
-  overflow: hidden;
-  background: white;
-  box-shadow: 0 28px 70px rgba(30,75,48,.17);
-  transform: rotate(-2deg);
-  border: 1px solid #e4eee6;
-}
+function saveHistory() {
+    undoStack.push({
+        data: cloneData(data),
+        headers: cloneData(headers)
+    });
 
-.preview-top {
-  height: 42px;
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  padding: 0 16px;
-  border-bottom: 1px solid #edf1ed;
-  color: #829087;
-  font-size: 10px;
-}
+    if (undoStack.length > 8) {
+        undoStack.shift();
+    }
 
-.preview-top span {
-  margin-left: auto;
+    redoStack = [];
+    updateUndoRedoButtons();
 }
 
-.preview-content {
-  padding: 20px;
+function updateUndoRedoButtons() {
+    $("undoBtn").disabled = undoStack.length === 0;
+    $("redoBtn").disabled = redoStack.length === 0;
 }
 
-.preview-metrics {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
+function clearFilter() {
+    filteredIndexes = null;
 }
 
-.preview-metrics div {
-  background: #f7faf7;
-  border: 1px solid #edf2ee;
-  padding: 10px;
-  border-radius: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
+// ============================================
+// UNDO / REDO
+// ============================================
 
-.preview-metrics small {
-  color: #a1ada4;
-  font-size: 7px;
-  letter-spacing: 1px;
-}
+function undo() {
+    if (!undoStack.length) return;
 
-.preview-metrics b {
-  font: 700 18px Manrope;
-  color: var(--green);
-}
+    redoStack.push({
+        data: cloneData(data),
+        headers: cloneData(headers)
+    });
 
-.preview-chart {
-  height: 120px;
-  margin-top: 15px;
-  border: 1px solid #edf2ee;
-  border-radius: 8px;
-  display: flex;
-  align-items: end;
-  padding: 12px;
-  gap: 10px;
-}
+    const previous = undoStack.pop();
 
-.preview-chart i {
-  flex: 1;
-  background: #8bc8a1;
-  border-radius: 3px 3px 0 0;
-}
+    data = previous.data;
+    headers = previous.headers;
 
-.floating-chip {
-  position: absolute;
-  z-index: 3;
-  right: 0;
-  bottom: 20px;
-  background: white;
-  box-shadow: 0 12px 35px rgba(28,67,44,.13);
-  border: 1px solid #edf2ee;
-  padding: 12px 15px;
-  border-radius: 12px;
-  color: var(--green);
-  font-size: 11px;
-  font-weight: 700;
+    clearFilter();
+    refresh();
 }
 
-/* BUTTONS */
-
-.button {
-  border: 0;
-  border-radius: 10px;
-  padding: 12px 17px;
-  font-size: 11px;
-  font-weight: 700;
-  transition: transform .2s, box-shadow .2s, background .2s;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-}
+function redo() {
+    if (!redoStack.length) return;
 
-.button:hover {
-  transform: translateY(-2px);
-}
+    undoStack.push({
+        data: cloneData(data),
+        headers: cloneData(headers)
+    });
 
-.button:disabled {
-  opacity: .45;
-  cursor: not-allowed;
-  transform: none;
-}
+    const next = redoStack.pop();
 
-.button-primary {
-  color: white;
-  background: var(--green);
-  box-shadow: 0 8px 18px rgba(8,127,75,.18);
-}
+    data = next.data;
+    headers = next.headers;
 
-.button-primary:hover {
-  background: var(--green-dark);
+    clearFilter();
+    refresh();
 }
 
-.button-soft {
-  background: #edf6f0;
-  color: var(--green-dark);
-}
+$("undoBtn").addEventListener("click", undo);
+$("redoBtn").addEventListener("click", redo);
 
-.button-outline {
-  background: white;
-  border: 1px solid #cfe2d5;
-  color: var(--green-dark);
-}
+// ============================================
+// FILE UPLOAD - CSV / XLS / XLSX
+// ============================================
 
-.button-quiet {
-  background: #f5f7f5;
-  color: #64736a;
-}
+$("uploadBtn").addEventListener("click", () => {
+    const file = $("fileInput").files[0];
 
-.button-light {
-  background: white;
-  color: var(--green-dark);
-}
+    if (!file) {
+        alert("Please select an Excel or CSV file first.");
+        return;
+    }
 
-.text-link {
-  font-size: 11px;
-  font-weight: 700;
-  color: #52645a;
-}
+    if (typeof XLSX === "undefined") {
+        alert("Excel library could not load. Check your internet connection.");
+        return;
+    }
 
-/* TRUST STRIP */
-
-.trust-strip {
-  display: grid;
-  grid-template-columns: repeat(4,1fr);
-  padding: 22px 30px;
-  background: white;
-  border: 1px solid var(--border);
-  border-radius: 15px;
-  box-shadow: 0 8px 30px rgba(25,60,40,.04);
-}
+    const extension = file.name.split(".").pop().toLowerCase();
 
-.trust-strip > div {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 5px;
-  border-right: 1px solid var(--border);
-}
+    if (!["csv", "xlsx", "xls"].includes(extension)) {
+        alert("Please upload a CSV, XLS or XLSX file.");
+        return;
+    }
 
-.trust-strip > div:last-child {
-  border: 0;
-}
+    showMessage("uploadMessage", "Reading your file...");
 
-.trust-strip b {
-  font-size: 11px;
-}
+    const reader = new FileReader();
 
-.trust-strip small {
-  color: #8b9990;
-  font-size: 9px;
-}
+    reader.onload = function(event) {
+        try {
+            const workbook = XLSX.read(event.target.result, {
+                type: "array",
+                raw: false,
+                cellDates: true
+            });
 
-/* SECTION HEADINGS */
+            if (!workbook.SheetNames.length) {
+                throw new Error("No worksheet found.");
+            }
 
-.content-section {
-  padding-top: 105px;
-  scroll-margin-top: 90px;
-}
+            const firstSheet =
+                workbook.Sheets[workbook.SheetNames[0]];
 
-.section-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: end;
-  margin-bottom: 28px;
-}
+            const sheetData = XLSX.utils.sheet_to_json(firstSheet, {
+                header: 1,
+                defval: "",
+                raw: false,
+                blankrows: false
+            });
 
-.section-heading h2 {
-  font: 800 38px/1.2 Manrope;
-  letter-spacing: -1.8px;
-  margin: 13px 0 8px;
-}
+            if (!sheetData.length) {
+                throw new Error("The file is empty.");
+            }
 
-.section-heading p {
-  color: var(--muted);
-  font-size: 12px;
-  margin: 0;
-}
+            const limits = getLimits();
 
-.step-pill {
-  padding: 8px 12px;
-  border: 1px solid #dce9df;
-  border-radius: 30px;
-  color: var(--green);
-  font-size: 9px;
-  font-weight: 800;
-  letter-spacing: 1px;
-  white-space: nowrap;
-}
+            const selectedHeaders = sheetData[0]
+                .slice(0, limits.cols);
 
-/* CARDS AND INPUTS */
-
-.panel-card {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 25px;
-  box-shadow: var(--shadow);
-}
+            if (!selectedHeaders.length) {
+                throw new Error("No columns found.");
+            }
 
-.upload-layout {
-  display: grid;
-  grid-template-columns: 1.35fr .85fr;
-  gap: 18px;
-}
+            const newHeaders = selectedHeaders.map((value, index) => {
+                const name = String(value ?? "").trim();
+                return name || `Column ${index + 1}`;
+            });
 
-.upload-card {
-  text-align: center;
-  padding: 35px;
-}
+            const newData = sheetData
+                .slice(1, limits.rows + 1)
+                .map(row => {
+                    const selectedRow = row.slice(0, limits.cols);
 
-.upload-icon {
-  width: 50px;
-  height: 50px;
-  margin: 0 auto 15px;
-  border-radius: 15px;
-  background: var(--green-light);
-  display: grid;
-  place-items: center;
-  color: var(--green);
-  font-size: 28px;
-}
+                    while (selectedRow.length < newHeaders.length) {
+                        selectedRow.push("");
+                    }
 
-.upload-card h3,
-.card-heading h3,
-.table-heading h3,
-.limits-card h3 {
-  font: 700 17px Manrope;
-  margin: 0;
-}
+                    return selectedRow;
+                });
 
-.muted,
-.card-heading p,
-.table-heading p {
-  color: var(--muted);
-  font-size: 11px;
-}
+            saveHistory();
 
-.file-drop {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 13px;
-  padding: 18px;
-  margin: 22px 0 16px;
-  border: 1px dashed #a9cbb3;
-  border-radius: 12px;
-  background: #f9fcf9;
-  text-align: left;
-  cursor: pointer;
-}
+            headers = newHeaders;
+            data = newData;
+            clearFilter();
 
-.file-symbol {
-  width: 34px;
-  height: 34px;
-  display: grid;
-  place-items: center;
-  background: white;
-  color: var(--green);
-  border: 1px solid #e3eee5;
-  border-radius: 9px;
-  font-size: 20px;
-}
+            refresh();
 
-.file-drop b,
-.file-drop small {
-  display: block;
-}
+            showMessage(
+                "uploadMessage",
+                `Successfully uploaded ${data.length} rows and ${headers.length} columns.`
+            );
 
-.file-drop b {
-  font-size: 11px;
-}
+            showMessage(
+                "tableMessage",
+                `Dataset loaded: ${data.length} rows × ${headers.length} columns.`
+            );
 
-.file-drop small {
-  color: #89978e;
-  font-size: 9px;
-  margin-top: 4px;
-}
+        } catch (error) {
+            console.error("File upload error:", error);
 
-.file-drop input {
-  max-width: 170px;
-  font-size: 9px;
-}
+            showMessage(
+                "uploadMessage",
+                "Unable to read the file. Please check its format."
+            );
 
-.upload-actions {
-  display: flex;
-  justify-content: center;
-  gap: 10px;
-  flex-wrap: wrap;
-}
+            alert(
+                "Unable to read this file. Please check that your CSV or Excel file is valid."
+            );
+        }
+    };
 
-.status-message {
-  min-height: 14px;
-  color: var(--green);
-  font-size: 10px;
-  margin: 13px 0 0;
-}
+    reader.onerror = function() {
+        showMessage("uploadMessage", "Unable to access the selected file.");
+        alert("Unable to read the selected file.");
+    };
 
-.limits-card h3 {
-  margin-bottom: 8px;
-}
+    reader.readAsArrayBuffer(file);
+});
 
-.limits-card > p {
-  margin: 7px 0 17px;
-}
+// ============================================
+// ROW AND COLUMN LIMITS
+// ============================================
 
-.input-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
+function getLimits() {
+    const rows = Math.max(
+        1,
+        Math.min(MAX_ROWS, Number($("rowCount").value) || 1)
+    );
 
-.input-grid label,
-.chart-controls label {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  color: #5e6e63;
-  font-size: 10px;
-  font-weight: 700;
-}
+    const cols = Math.max(
+        1,
+        Math.min(MAX_COLUMNS, Number($("colCount").value) || 1)
+    );
 
-.input-grid input,
-.control-toolbar select,
-.control-toolbar input,
-.analyze-controls select,
-.table-tools select,
-.table-tools input,
-.chart-controls select {
-  min-width: 0;
-  border: 1px solid #e1eae3;
-  border-radius: 8px;
-  padding: 10px;
-  color: var(--ink);
-  background: white;
-  outline: none;
-  font-size: 11px;
-}
+    $("rowCount").value = rows;
+    $("colCount").value = cols;
 
-.input-grid input:focus,
-select:focus,
-input:focus {
-  border-color: #8fc4a0;
+    return { rows, cols };
 }
 
-.input-grid small,
-.chart-controls small {
-  color: #a1ada4;
-  font-size: 8px;
-  font-weight: 400;
-}
+$("applySelectionBtn").addEventListener("click", () => {
+    if (!headers.length) {
+        alert("Please upload a file or load sample data first.");
+        return;
+    }
 
-.limits-card > .button {
-  margin-top: 15px;
-}
+    const limits = getLimits();
 
-/* WORKSPACE */
+    saveHistory();
 
-.workspace-grid {
-  display: grid;
-  grid-template-columns: .8fr 1.2fr;
-  gap: 18px;
-  align-items: start;
-}
+    data = data.slice(0, limits.rows);
+    headers = headers.slice(0, limits.cols);
 
-.card-heading,
-.table-heading > div {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
+    data = data.map(row => {
+        const newRow = row.slice(0, limits.cols);
 
-.card-heading p,
-.table-heading p {
-  margin: 4px 0 0;
-}
+        while (newRow.length < headers.length) {
+            newRow.push("");
+        }
 
-.mini-icon {
-  width: 35px;
-  height: 35px;
-  display: grid;
-  place-items: center;
-  border-radius: 10px;
-  background: var(--green-light);
-  color: var(--green);
-  font-size: 17px;
-  flex-shrink: 0;
-}
+        return newRow;
+    });
 
-.full-button {
-  width: 100%;
-  margin-top: 18px;
-}
+    clearFilter();
+    refresh();
 
-.tool-group {
-  border-top: 1px solid #edf1ed;
-  padding-top: 15px;
-  margin-top: 16px;
-}
+    showMessage(
+        "tableMessage",
+        `Showing ${data.length} rows and ${headers.length} columns.`
+    );
+});
 
-.tool-label {
-  display: block;
-  color: #8b9990;
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 1.2px;
-  margin-bottom: 10px;
-}
+// ============================================
+// SAMPLE DATA
+// ============================================
 
-.toolbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 7px;
-}
+function loadSampleData() {
+    saveHistory();
 
-.toolbar .button {
-  padding: 9px 11px;
-  font-size: 9px;
-}
+    headers = ["Name", "Age", "Marks", "Attendance", "Salary"];
 
-.control-toolbar select,
-.control-toolbar input {
-  flex: 1;
-  min-width: 90px;
-  padding: 9px;
-}
+    data = [
+        ["Aman", 20, 85, 90, 25000],
+        ["Riya", 21, 92, 95, 30000],
+        ["Rahul", 19, 70, 80, 22000],
+        ["Priya", 22, 88, 85, 28000],
+        ["Karan", 20, 65, 75, 20000],
+        ["Neha", 21, 95, 98, 35000],
+        ["Arjun", 23, 78, 82, 26000],
+        ["Simran", 20, 82, 88, 27000],
+        ["Anjali", 22, 90, 93, 32000],
+        ["Vikas", 19, 60, 70, 18000]
+    ];
 
-.control-toolbar input {
-  min-width: 110px;
+    clearFilter();
+    refresh();
+
+    showMessage("uploadMessage", "Sample data loaded successfully.");
 }
 
-/* TABLE */
+$("sampleBtn").addEventListener("click", loadSampleData);
 
-.table-card {
-  margin-top: 18px;
-}
+// ============================================
+// MANUAL TABLE CREATION
+// ============================================
 
-.table-heading {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 15px;
-  flex-wrap: wrap;
-}
+$("createBtn").addEventListener("click", () => {
+    const rows = Math.max(
+        1,
+        Math.min(MAX_ROWS, Number($("manualRows").value) || 1)
+    );
 
-.export-actions {
-  display: flex;
-  gap: 7px;
-  flex-wrap: wrap;
-}
+    const cols = Math.max(
+        1,
+        Math.min(MAX_COLUMNS, Number($("manualCols").value) || 1)
+    );
 
-.export-actions .button {
-  padding: 10px 12px;
-  font-size: 9px;
-}
+    $("manualRows").value = rows;
+    $("manualCols").value = cols;
 
-.table-tools {
-  display: flex;
-  gap: 9px;
-  margin: 22px 0 13px;
-}
+    saveHistory();
 
-.table-tools input {
-  flex: 1;
-}
+    headers = Array.from(
+        { length: cols },
+        (_, index) => `Column ${index + 1}`
+    );
 
-.table-tools select {
-  min-width: 130px;
-}
+    data = Array.from(
+        { length: rows },
+        () => Array(cols).fill("")
+    );
 
-.table-area {
-  width: 100%;
-  overflow: auto;
-  border: 1px solid #e9efea;
-  border-radius: 10px;
-  min-height: 90px;
-  max-height: 550px;
-}
+    clearFilter();
+    refresh();
 
-.table-area > p {
-  padding: 15px;
-  color: var(--muted);
-  font-size: 11px;
-}
+    showMessage("dataMessage", "Blank table created successfully.");
+});
 
-table {
-  border-collapse: collapse;
-  width: 100%;
-  min-width: 550px;
-  font-size: 10px;
-}
+// ============================================
+// DROPDOWN MANAGEMENT
+// ============================================
 
-th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: #eff7f1;
-  color: #42634d;
-  font-weight: 700;
-  text-align: left;
-}
+function fillDropdown(id, selectedValue, includeAll = true) {
+    const select = $(id);
+    if (!select) return;
 
-th, td {
-  padding: 7px 9px;
-  border-bottom: 1px solid #edf1ed;
-  white-space: nowrap;
-}
+    const previousValue = selectedValue ?? select.value;
 
-td input {
-  width: 100%;
-  min-width: 70px;
-  padding: 5px;
-  border: 1px solid transparent;
-  border-radius: 5px;
-  background: transparent;
-  color: var(--ink);
-  font-size: 10px;
-}
+    select.innerHTML = "";
 
-td input:focus {
-  background: white;
-  border-color: #9ccbaa;
-  outline: none;
-}
+    headers.forEach((header, index) => {
+        const option = document.createElement("option");
+        option.value = index;
+        option.textContent = header;
+        select.appendChild(option);
+    });
 
-tr:hover td {
-  background: #fbfdfb;
-}
+    if (headers.length) {
+        const numericValue = Number(previousValue);
 
-/* ANALYSIS */
-
-.analysis-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 15px;
-  flex-wrap: wrap;
+        if (
+            previousValue !== "" &&
+            Number.isInteger(numericValue) &&
+            numericValue >= 0 &&
+            numericValue < headers.length
+        ) {
+            select.value = numericValue;
+        }
+    }
 }
 
-.analyze-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
+function updateDropdowns() {
+    const oldCategory = $("chartCategory").value;
+    const oldValue = $("chartValue").value;
+    const oldAnalysis = $("analysisColumn").value;
 
-.analyze-controls select {
-  min-width: 140px;
-}
+    [
+        "sortColumn",
+        "filterColumn",
+        "searchColumn",
+        "analysisColumn",
+        "chartCategory",
+        "chartValue"
+    ].forEach(id => fillDropdown(id));
 
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(5,1fr);
-  gap: 10px;
-  margin-top: 25px;
-}
+    if (headers.length) {
+        if (oldAnalysis !== "" && Number(oldAnalysis) < headers.length) {
+            $("analysisColumn").value = oldAnalysis;
+        }
 
-.stat-item {
-  padding: 16px;
-  border: 1px solid #eaf0eb;
-  border-radius: 11px;
-  background: #fbfdfb;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-}
+        if (oldCategory !== "" && Number(oldCategory) < headers.length) {
+            $("chartCategory").value = oldCategory;
+        } else {
+            $("chartCategory").value = getFirstCategoryColumn();
+        }
 
-.stat-item small {
-  color: #8b9990;
-  font-size: 8px;
-  font-weight: 800;
-  letter-spacing: 1px;
+        if (oldValue !== "" && Number(oldValue) < headers.length) {
+            $("chartValue").value = oldValue;
+        } else {
+            $("chartValue").value = getFirstNumericColumn();
+        }
+    }
 }
 
-.stat-item strong {
-  font: 800 22px Manrope;
-  color: var(--green);
-  overflow-wrap: anywhere;
-}
+// ============================================
+// TABLE DISPLAY
+// ============================================
 
-.stat-item span {
-  color: #94a097;
-  font-size: 9px;
-}
+function displayTable() {
+    const tableArea = $("tableArea");
 
-.insights-panel {
-  margin-top: 17px;
-  padding: 17px;
-  border-radius: 11px;
-  background: #f1f8f2;
-}
+    if (!headers.length) {
+        tableArea.innerHTML = `
+            <p>No data available. Upload a file or create a table.</p>
+        `;
+        return;
+    }
 
-.insights-panel h3 {
-  margin: 0;
-  color: var(--green);
-  font-size: 12px;
-}
+    const indexes = getCurrentIndexes();
 
-.insights-panel ul {
-  margin: 12px 0 0;
-  padding-left: 17px;
-  color: #65756a;
-  font-size: 10px;
-  line-height: 1.9;
-}
+    const searchText = $("columnSearch").value.trim().toLowerCase();
+    const searchColumn = Number($("searchColumn").value || 0);
 
-/* CHARTS */
+    let visibleIndexes = indexes;
 
-.charts-panel {
-  margin-bottom: 20px;
-}
+    if (searchText) {
+        visibleIndexes = indexes.filter(index =>
+            String(data[index][searchColumn] ?? "")
+                .toLowerCase()
+                .includes(searchText)
+        );
+    }
 
-.chart-settings {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
+    const visibleHeaders = headers.slice(0, PREVIEW_COLUMNS);
+    const visibleRows = visibleIndexes.slice(0, PREVIEW_ROWS);
 
-.chart-controls {
-  display: grid;
-  grid-template-columns: 1fr 1fr auto;
-  gap: 12px;
-  align-items: end;
-}
+    let html = `
+        <table>
+            <thead>
+                <tr>
+                    <th>Row</th>
+    `;
 
-.chart-controls select {
-  width: 100%;
-  margin-top: 3px;
-}
+    visibleHeaders.forEach(header => {
+        html += `<th>${escapeHTML(header)}</th>`;
+    });
 
-.chart-controls .button {
-  min-height: 38px;
-}
+    html += `
+                </tr>
+            </thead>
+            <tbody>
+    `;
 
-.chart-explanation {
-  margin-top: 22px;
-  padding: 15px 17px;
-  border: 1px solid #dcece0;
-  border-radius: 11px;
-  background: #f5faf6;
-}
+    visibleRows.forEach(rowIndex => {
+        const row = data[rowIndex];
 
-.chart-explanation b {
-  color: var(--green-dark);
-  font-size: 11px;
-}
+        html += `<tr><td>${rowIndex + 1}</td>`;
 
-.chart-explanation p {
-  color: var(--muted);
-  font-size: 10px;
-  line-height: 1.7;
-  margin: 7px 0 0;
-}
+        visibleHeaders.forEach((header, columnIndex) => {
+            html += `
+                <td>
+                    <input
+                        type="text"
+                        value="${escapeHTML(row[columnIndex] ?? "")}"
+                        data-row="${rowIndex}"
+                        data-col="${columnIndex}"
+                        aria-label="Row ${rowIndex + 1}, Column ${columnIndex + 1}"
+                    >
+                </td>
+            `;
+        });
 
-.charts-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0,1fr));
-  gap: 15px;
-  margin-top: 22px;
-}
+        html += "</tr>";
+    });
 
-.chart-box {
-  min-width: 0;
-  min-height: 340px;
-  padding: 18px;
-  border: 1px solid #eaf0eb;
-  border-radius: 12px;
-  background: #fff;
-  position: relative;
-}
+    html += `
+            </tbody>
+        </table>
+    `;
 
-.chart-title {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  margin-bottom: 15px;
-}
+    tableArea.innerHTML = html;
 
-.chart-title b {
-  font: 700 13px Manrope;
-}
+    const extraRows = Math.max(0, visibleIndexes.length - PREVIEW_ROWS);
+    const extraColumns = Math.max(0, headers.length - PREVIEW_COLUMNS);
 
-.chart-title span {
-  color: #98a49b;
-  font-size: 9px;
-}
+    if (extraRows || extraColumns) {
+        tableArea.insertAdjacentHTML("beforeend", `
+            <p class="preview-note">
+                Preview shows up to ${PREVIEW_ROWS} rows and
+                ${PREVIEW_COLUMNS} columns.
+                ${extraRows ? `${extraRows} additional matching rows are stored. ` : ""}
+                ${extraColumns ? `${extraColumns} additional columns are stored.` : ""}
+            </p>
+        `);
+    }
 
-.canvas-wrap {
-  position: relative;
-  width: 100%;
-  height: 265px;
-}
+    tableArea.querySelectorAll("td input").forEach(input => {
+        input.addEventListener("change", function() {
+            const rowIndex = Number(this.dataset.row);
+            const colIndex = Number(this.dataset.col);
 
-/* FOOTER CTA */
-
-.closing-cta {
-  margin-top: 100px;
-  margin-bottom: 70px;
-  border-radius: 20px;
-  padding: 48px 55px;
-  background: #eaf5ec;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 25px;
-}
+            if (!data[rowIndex]) return;
+            if (String(data[rowIndex][colIndex] ?? "") === this.value) return;
 
-.closing-cta h2 {
-  font: 800 40px/1.15 Manrope;
-  letter-spacing: -1.5px;
-  margin: 17px 0 10px;
-}
+            saveHistory();
 
-.closing-cta p {
-  color: #728078;
-  font-size: 11px;
-}
+            data[rowIndex][colIndex] = this.value;
 
-.site-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 22px 0 30px;
-  border-top: 1px solid var(--border);
-  color: #8b9990;
-  font-size: 10px;
+            refresh();
+        });
+    });
 }
 
-.site-footer > a:last-child {
-  color: var(--green);
-  font-weight: 700;
-}
+$("columnSearch").addEventListener("input", displayTable);
+$("searchColumn").addEventListener("change", displayTable);
 
-/* DARK MODE */
-
-body.dark-mode {
-  --ink: #e6eee8;
-  --muted: #9aa99f;
-  --surface: #18251e;
-  --background: #101a14;
-  --border: #2b3a30;
-  --green-light: #203c2b;
-  --shadow: 0 18px 55px rgba(0,0,0,.16);
-}
+// ============================================
+// ADD ROW
+// ============================================
 
-.dark-mode .site-header {
-  background: rgba(19,31,23,.94);
-  border-color: #2b3a30;
-}
+$("addRowBtn").addEventListener("click", () => {
+    if (!headers.length) {
+        alert("Create or upload a table first.");
+        return;
+    }
 
-.dark-mode .theme-toggle,
-.dark-mode .limits-card,
-.dark-mode .dashboard-preview,
-.dark-mode .floating-chip,
-.dark-mode .file-drop,
-.dark-mode .input-grid input,
-.dark-mode .control-toolbar select,
-.dark-mode .control-toolbar input,
-.dark-mode .analyze-controls select,
-.dark-mode .table-tools select,
-.dark-mode .table-tools input,
-.dark-mode .chart-controls select,
-.dark-mode .chart-box,
-.dark-mode .table-area {
-  background: #1c2b22;
-  color: var(--ink);
-  border-color: #34483a;
-}
+    if (data.length >= MAX_ROWS) {
+        alert("Maximum 1000 rows allowed.");
+        return;
+    }
 
-.dark-mode .brand-copy strong,
-.dark-mode .floating-chip,
-.dark-mode .upload-card h3,
-.dark-mode .card-heading h3,
-.dark-mode .table-heading h3,
-.dark-mode .limits-card h3 {
-  color: var(--ink);
-}
+    saveHistory();
 
-.dark-mode .main-nav a,
-.dark-mode .text-link {
-  color: #b1c0b5;
-}
+    data.push(Array(headers.length).fill(""));
 
-.dark-mode .trust-strip,
-.dark-mode .panel-card {
-  background: var(--surface);
-  border-color: var(--border);
-}
+    clearFilter();
+    refresh();
+});
 
-.dark-mode .insights-panel,
-.dark-mode .closing-cta,
-.dark-mode .chart-explanation {
-  background: #20372a;
-  border-color: #34483a;
-}
+// ============================================
+// ADD COLUMN
+// ============================================
 
-.dark-mode .chart-explanation b {
-  color: #b9e2c6;
-}
+$("addColBtn").addEventListener("click", () => {
+    if (!headers.length) {
+        alert("Create or upload a table first.");
+        return;
+    }
 
-.dark-mode .stat-item,
-.dark-mode th {
-  background: #203329;
-  border-color: #34483a;
-  color: var(--ink);
-}
+    if (headers.length >= MAX_COLUMNS) {
+        alert("Maximum 500 columns allowed.");
+        return;
+    }
 
-.dark-mode td input {
-  color: var(--ink);
-}
+    saveHistory();
 
-.dark-mode tr:hover td {
-  background: #203329;
-}
+    headers.push(`Column ${headers.length + 1}`);
 
-.dark-mode .button-soft,
-.dark-mode .button-quiet {
-  background: #294333;
-  color: #c4e4ce;
-}
+    data.forEach(row => row.push(""));
 
-.dark-mode .button-outline {
-  background: #1c2b22;
-  color: #c4e4ce;
-  border-color: #476650;
-}
+    clearFilter();
+    refresh();
+});
 
-.dark-mode .file-drop small,
-.dark-mode .chart-title span {
-  color: #a4b3a8;
-}
+// ============================================
+// CLEAN EMPTY ROWS
+// ============================================
 
-/* RESPONSIVE */
-
-@media (max-width: 900px) {
-  .main-nav { gap: 15px; }
-  .main-nav a { font-size: 10px; }
-  .hero { gap: 10px; }
-  .hero h1 { font-size: 48px; }
-  .workspace-grid { grid-template-columns: 1fr; }
-  .stats-grid { grid-template-columns: repeat(3,1fr); }
-}
+$("cleanBtn").addEventListener("click", () => {
+    if (!data.length) {
+        alert("No data available.");
+        return;
+    }
+
+    saveHistory();
+
+    const oldLength = data.length;
+
+    data = data.filter(row =>
+        row.some(value => String(value ?? "").trim() !== "")
+    );
+
+    clearFilter();
+    refresh();
+
+    showMessage(
+        "tableMessage",
+        `${oldLength - data.length} empty rows removed.`
+    );
+});
+
+// ============================================
+// REMOVE DUPLICATES
+// ============================================
+
+$("removeDuplicatesBtn").addEventListener("click", () => {
+    if (!data.length) {
+        alert("No data available.");
+        return;
+    }
+
+    saveHistory();
+
+    const oldLength = data.length;
+    const seen = new Set();
+
+    data = data.filter(row => {
+        const key = JSON.stringify(row);
+
+        if (seen.has(key)) return false;
 
-@media (max-width: 650px) {
-  .section-shell {
-    width: min(100% - 30px, 1160px);
-  }
-
-  .site-header {
-    min-height: 68px;
-    padding: 12px 15px;
-    flex-wrap: wrap;
-    gap: 12px;
-  }
-
-  .brand-copy strong { font-size: 14px; }
-
-  .main-nav {
-    order: 3;
-    width: 100%;
-    overflow-x: auto;
-    justify-content: space-between;
-    padding: 7px 0 3px;
-  }
-
-  .main-nav a { white-space: nowrap; }
-
-  .theme-toggle {
-    margin-left: auto;
-    padding: 8px 10px;
-  }
-
-  .hero {
-    grid-template-columns: 1fr;
-    gap: 5px;
-    min-height: auto;
-    padding-top: 58px;
-    padding-bottom: 36px;
-  }
-
-  .hero h1 {
-    font-size: clamp(40px,11vw,55px);
-    letter-spacing: -2px;
-  }
-
-  .hero-description { font-size: 14px; }
-  .hero-visual { min-height: 300px; margin-top: 12px; }
-  .dashboard-preview { width: 88%; }
-
-  .trust-strip {
-    grid-template-columns: repeat(2,1fr);
-    gap: 17px 8px;
-    padding: 18px 10px;
-  }
-
-  .trust-strip > div {
-    border: 0;
-    justify-content: center;
-  }
-
-  .content-section { padding-top: 75px; }
-
-  .section-heading {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 13px;
-  }
-
-  .section-heading h2 { font-size: 34px; }
-
-  .upload-layout { grid-template-columns: 1fr; }
-  .upload-card { padding: 24px 17px; }
-  .file-drop { justify-content: flex-start; }
-
-  .panel-card {
-    padding: 18px;
-    border-radius: 17px;
-  }
-
-  .table-heading { align-items: flex-start; }
-  .export-actions { width: 100%; }
-
-  .export-actions .button {
-    flex: 1;
-    padding-inline: 8px;
-    font-size: 9px;
-  }
-
-  .analysis-heading { align-items: flex-start; }
-  .analyze-controls { width: 100%; }
-  .analyze-controls select { flex: 1; }
-
-  .chart-controls {
-    grid-template-columns: 1fr;
-  }
-
-  .charts-grid { grid-template-columns: 1fr; }
-  .chart-box { min-height: 320px; padding: 16px; }
-
-  .closing-cta {
-    align-items: flex-start;
-    flex-direction: column;
-    margin-top: 75px;
-    padding: 34px 25px;
-  }
-
-  .closing-cta h2 { font-size: 32px; }
-
-  .site-footer { flex-wrap: wrap; }
-  .site-footer > span { order: 3; width: 100%; }
+        seen.add(key);
+        return true;
+    });
+
+    clearFilter();
+    refresh();
+
+    showMessage(
+        "tableMessage",
+        `${oldLength - data.length} duplicate rows removed.`
+    );
+});
+
+// ============================================
+// SORT DATA
+// ============================================
+
+$("sortBtn").addEventListener("click", () => {
+    if (!data.length) {
+        alert("No data available.");
+        return;
+    }
+
+    const columnIndex = Number($("sortColumn").value);
+    const order = $("sortOrder").value;
+
+    saveHistory();
+
+    data.sort((a, b) => {
+        const valueA = a[columnIndex] ?? "";
+        const valueB = b[columnIndex] ?? "";
+
+        const numA = parseNumber(valueA);
+        const numB = parseNumber(valueB);
+
+        let result;
+
+        if (numA !== null && numB !== null) {
+            result = numA - numB;
+        } else {
+            result = String(valueA).localeCompare(String(valueB));
+        }
+
+        return order === "asc" ? result : -result;
+    });
+
+    clearFilter();
+    refresh();
+
+    showMessage("tableMessage", "Data sorted successfully.");
+});
+
+// ============================================
+// FILTER DATA
+// ============================================
+
+$("filterBtn").addEventListener("click", () => {
+    if (!data.length) {
+        alert("No data available.");
+        return;
+    }
+
+    const columnIndex = Number($("filterColumn").value);
+    const filterValue = $("filterValue").value.toLowerCase();
+
+    filteredIndexes = [];
+
+    data.forEach((row, index) => {
+        const value = String(row[columnIndex] ?? "").toLowerCase();
+
+        if (value.includes(filterValue)) {
+            filteredIndexes.push(index);
+        }
+    });
+
+    refresh();
+
+    showMessage(
+        "tableMessage",
+        `${filteredIndexes.length} matching rows found.`
+    );
+});
+
+// ============================================
+// CLEAR FILTER
+// ============================================
+
+$("clearFilterBtn").addEventListener("click", () => {
+    clearFilter();
+
+    $("filterValue").value = "";
+    $("columnSearch").value = "";
+
+    refresh();
+
+    showMessage("tableMessage", "Filters cleared.");
+});
+
+// ============================================
+// STATISTICAL ANALYSIS
+// ============================================
+
+function calculateMode(values) {
+    if (!values.length) return "—";
+
+    const frequency = new Map();
+
+    values.forEach(value => {
+        frequency.set(value, (frequency.get(value) || 0) + 1);
+    });
+
+    const highestFrequency = Math.max(...frequency.values());
+
+    return [...frequency.entries()]
+        .filter(entry => entry[1] === highestFrequency)
+        .map(entry => entry[0])
+        .join(", ");
 }
+
+function analyzeData() {
+    if (!headers.length) {
+        $("countStat").textContent = "—";
+        $("sumStat").textContent = "—";
+        $("avgStat").textContent = "—";
+        $("minStat").textContent = "—";
+        $("maxStat").textContent = "—";
+
+        $("insightsList").innerHTML =
+            "<li>Load data to generate insights.</li>";
+
+        return;
+    }
+
+    const columnIndex = Number($("analysisColumn").value || 0);
+    const values = getNumericValues(columnIndex);
 
-@media (max-width: 390px) {
-  .hero-actions { gap: 15px; }
-  .hero-proof { flex-wrap: wrap; font-size: 9px; }
-  .input-grid { grid-template-columns: 1fr; }
-  .file-drop { flex-wrap: wrap; }
-  .toolbar .button { flex: 1 1 auto; }
-
-  .control-toolbar select,
-  .control-toolbar input {
-    flex-basis: 100%;
-  }
-
-  .stats-grid {
-    grid-template-columns: repeat(2,1fr);
-  }
+    if (!values.length) {
+        $("countStat").textContent = "0";
+        $("sumStat").textContent = "—";
+        $("avgStat").textContent = "—";
+        $("minStat").textContent = "—";
+        $("maxStat").textContent = "—";
+
+        $("insightsList").innerHTML =
+            "<li>No numeric values found in this column. Select another column.</li>";
+
+        return;
+    }
+
+    const sorted = [...values].sort((a, b) => a - b);
+    const sum = values.reduce((total, value) => total + value, 0);
+    const average = sum / values.length;
+
+    const median = sorted.length % 2 === 0
+        ? (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2
+        : sorted[Math.floor(sorted.length / 2)];
+
+    const minimum = Math.min(...values);
+    const maximum = Math.max(...values);
+
+    const variance = values.reduce(
+        (total, value) => total + Math.pow(value - average, 2),
+        0
+    ) / values.length;
+
+    const standardDeviation = Math.sqrt(variance);
+    const mode = calculateMode(values);
+
+    $("countStat").textContent = values.length;
+    $("sumStat").textContent = formatNumber(sum);
+    $("avgStat").textContent = formatNumber(average);
+    $("minStat").textContent = formatNumber(minimum);
+    $("maxStat").textContent = formatNumber(maximum);
+
+    $("insightsList").innerHTML = `
+        <li>Selected column: <b>${escapeHTML(headers[columnIndex])}</b></li>
+        <li>Total numeric values: <b>${values.length}</b></li>
+        <li>Sum: <b>${formatNumber(sum)}</b></li>
+        <li>Average: <b>${formatNumber(average)}</b></li>
+        <li>Median: <b>${formatNumber(median)}</b></li>
+        <li>Mode: <b>${escapeHTML(mode)}</b></li>
+        <li>Minimum: <b>${formatNumber(minimum)}</b></li>
+        <li>Maximum: <b>${formatNumber(maximum)}</b></li>
+        <li>Standard deviation: <b>${formatNumber(standardDeviation)}</b></li>
+    `;
 }
+
+$("analyzeBtn").addEventListener("click", analyzeData);
+$("analysisColumn").addEventListener("change", analyzeData);
+
+// ============================================
+// CHART CONFIGURATION
+// ============================================
+
+const chartColors = [
+    "#087f4b",
+    "#48a878",
+    "#8bc9a2",
+    "#b6dfc2",
+    "#d3ead9",
+    "#5eaa7d",
+    "#a2d5b2",
+    "#347d55",
+    "#6eaa8b",
+    "#c2dfcc",
+    "#3d8b65",
+    "#91c9a7"
+];
+
+function destroyCharts() {
+    Object.values(charts).forEach(chart => {
+        if (chart) chart.destroy();
+    });
+
+    charts = {};
+}
+
+function getChartRows() {
+    const categoryIndex = Number($("chartCategory").value);
+    const valueIndex = Number($("chartValue").value);
+
+    return getCurrentData()
+        .map((row, index) => {
+            const value = parseNumber(row[valueIndex]);
+
+            let category = String(row[categoryIndex] ?? "").trim();
+
+            if (!category) {
+                category = `Record ${index + 1}`;
+            }
+
+            return {
+                category,
+                value
+            };
+        })
+        .filter(item => item.value !== null);
+}
+
+function createChartOptions(type) {
+    const darkMode = document.body.classList.contains("dark-mode");
+    const textColor = darkMode ? "#dce8df" : "#64736a";
+    const gridColor = darkMode ? "#34483a" : "#e8eee9";
+
+    const options = {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: {
+            duration: 500
+        },
+        plugins: {
+            legend: {
+                display: true,
+                position: type === "pie" || type === "doughnut" ? "bottom" : "top",
+                labels: {
+                    color: textColor,
+                    usePointStyle: true,
+                    padding: 16,
+                    boxWidth: 10
+                }
+            },
+            tooltip: {
+                callbacks: {
+                    title(items) {
+                        return items[0]?.label || "";
+                    },
+                    label(context) {
+                        const value = context.parsed.y ?? context.parsed;
+                        const formatted = formatNumber(
+                            typeof value === "number" ? value : Number(value)
+                        );
+
+                        if (type === "pie" || type === "doughnut") {
+                            const total = context.dataset.data.reduce(
+                                (sum, item) => sum + item,
+                                0
+                            );
+
+                            const percentage = total
+                                ? (context.raw / total) * 100
+                                : 0;
+
+                            return ` ${formatted} (${percentage.toFixed(1)}%)`;
+                        }
+
+                        return ` ${context.dataset.label}: ${formatted}`;
+                    }
+                }
+            }
+        }
+    };
+
+    if (type === "bar" || type === "line") {
+        options.scales = {
+            x: {
+                ticks: {
+                    color: textColor,
+                    maxRotation: 50,
+                    minRotation: 0
+                },
+                grid: {
+                    color: gridColor
+                },
+                title: {
+                    display: true,
+                    text: headers[Number($("chartCategory").value)] || "Category",
+                    color: textColor
+                }
+            },
+            y: {
+                beginAtZero: true,
+                ticks: {
+                    color: textColor
+                },
+                grid: {
+                    color: gridColor
+                },
+                title: {
+                    display: true,
+                    text: headers[Number($("chartValue").value)] || "Value",
+                    color: textColor
+                }
+            }
+        };
+    }
+
+    return options;
+}
+
+function createOneChart(canvasId, type, labels, values, datasetLabel) {
+    const canvas = $(canvasId);
+
+    if (!canvas) return;
+
+    const isCircular = type === "pie" || type === "doughnut";
+
+    const dataset = {
+        label: datasetLabel,
+        data: values,
+        borderWidth: type === "line" ? 3 : 1,
+        borderColor: type === "line" ? "#087f4b" : "#ffffff",
+        backgroundColor: isCircular
+            ? labels.map((_, index) => chartColors[index % chartColors.length])
+            : type === "line"
+                ? "rgba(8,127,75,0.12)"
+                : "#48a878"
+    };
+
+    if (type === "line") {
+        dataset.fill = true;
+        dataset.tension = 0.35;
+        dataset.pointRadius = 4;
+        dataset.pointHoverRadius = 7;
+        dataset.pointBackgroundColor = "#087f4b";
+    }
+
+    if (type === "bar") {
+        dataset.borderRadius = 5;
+        dataset.maxBarThickness = 45;
+    }
+
+    charts[canvasId] = new Chart(canvas, {
+        type,
+        data: {
+            labels,
+            datasets: [dataset]
+        },
+        options: createChartOptions(type)
+    });
+}
+
+// ============================================
+// PIE AND DOUGHNUT CATEGORY TOTALS
+// ============================================
+
+function getCategoryTotals(rows) {
+    const totals = new Map();
+
+    rows.forEach(item => {
+        totals.set(
+            item.category,
+            (totals.get(item.category) || 0) + item.value
+        );
+    });
+
+    let entries = [...totals.entries()]
+        .filter(([category, value]) => value > 0)
+        .sort((a, b) => b[1] - a[1]);
+
+    if (entries.length > 12) {
+        const topEntries = entries.slice(0, 11);
+        const otherTotal = entries
+            .slice(11)
+            .reduce((sum, entry) => sum + entry[1], 0);
+
+        topEntries.push(["Other categories", otherTotal]);
+        entries = topEntries;
+    }
+
+    return {
+        labels: entries.map(entry => entry[0]),
+        values: entries.map(entry => entry[1])
+    };
+}
+
+// ============================================
+// DRAW ALL FOUR CHARTS
+// ============================================
+
+function drawCharts() {
+    destroyCharts();
+
+    if (typeof Chart === "undefined") {
+        showMessage("chartMessage", "Chart library could not load. Check your internet connection.");
+        return;
+    }
+
+    if (!headers.length || !data.length) {
+        showMessage("chartMessage", "Upload data to create charts.");
+        return;
+    }
+
+    const categoryIndex = Number($("chartCategory").value);
+    const valueIndex = Number($("chartValue").value);
+
+    if (
+        !Number.isInteger(categoryIndex) ||
+        !Number.isInteger(valueIndex) ||
+        categoryIndex < 0 ||
+        valueIndex < 0 ||
+        categoryIndex >= headers.length ||
+        valueIndex >= headers.length
+    ) {
+        showMessage("chartMessage", "Please select valid category and value columns.");
+        return;
+    }
+
+    const rows = getChartRows();
+
+    if (!rows.length) {
+        showMessage(
+            "chartMessage",
+            "No numeric values found in the selected Value Column. Choose a numeric column."
+        );
+        return;
+    }
+
+    const labels = rows.map(item => item.category);
+    const values = rows.map(item => item.value);
+
+    const valueName = headers[valueIndex];
+
+    // 1. BAR CHART
+    createOneChart(
+        "barChart",
+        "bar",
+        labels,
+        values,
+        valueName
+    );
+
+    // 2. LINE CHART
+    createOneChart(
+        "lineChart",
+        "line",
+        labels,
+        values,
+        valueName
+    );
+
+    // 3. PIE CHART
+    const categoryTotals = getCategoryTotals(rows);
+
+    if (categoryTotals.values.length) {
+        createOneChart(
+            "pieChart",
+            "pie",
+            categoryTotals.labels,
+            categoryTotals.values,
+            valueName
+        );
+
+        // 4. DOUGHNUT CHART
+        createOneChart(
+            "doughnutChart",
+            "doughnut",
+            categoryTotals.labels,
+            categoryTotals.values,
+            valueName
+        );
+
+        showMessage(
+            "chartMessage",
+            `Charts updated. ${rows.length} records plotted using "${headers[categoryIndex]}" and "${valueName}". Pie and Doughnut show category totals and percentages on hover.`
+        );
+    } else {
+        showMessage(
+            "chartMessage",
+            "Bar and Line charts are ready. Pie and Doughnut need positive values to calculate proportions."
+        );
+    }
+}
+
+$("drawChartBtn").addEventListener("click", drawCharts);
+$("chartCategory").addEventListener("change", drawCharts);
+$("chartValue").addEventListener("change", drawCharts);
+
+// ============================================
+// DOWNLOAD EXCEL
+// ============================================
+
+$("downloadExcelBtn").addEventListener("click", () => {
+    if (!data.length) {
+        alert("No data to download.");
+        return;
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(
+        workbook,
+        worksheet,
+        "Analyzed Data"
+    );
+
+    XLSX.writeFile(workbook, "Excel_Data_Analyzer.xlsx");
+});
+
+// ============================================
+// DOWNLOAD CSV
+// ============================================
+
+$("downloadCSVBtn").addEventListener("click", () => {
+    if (!data.length) {
+        alert("No data to download.");
+        return;
+    }
+
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...data]);
+    const csv = XLSX.utils.sheet_to_csv(worksheet);
+
+    const blob = new Blob(
+        ["\uFEFF" + csv],
+        { type: "text/csv;charset=utf-8;" }
+    );
+
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+
+    link.href = url;
+    link.download = "Excel_Data_Analyzer.csv";
+    link.click();
+
+    URL.revokeObjectURL(url);
+});
+
+// ============================================
+// DOWNLOAD PDF
+// ============================================
+
+$("downloadPDFBtn").addEventListener("click", () => {
+    if (!data.length) {
+        alert("No data to export.");
+        return;
+    }
+
+    if (!window.jspdf || !window.jspdf.jsPDF) {
+        alert("PDF library could not load. Check your internet connection.");
+        return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const pdf = new jsPDF("landscape");
+
+    pdf.text("Excel Data Analyzer Report", 14, 15);
+    pdf.text(
+        `Rows: ${data.length} | Columns: ${headers.length}`,
+        14,
+        22
+    );
+
+    if (typeof pdf.autoTable !== "function") {
+        alert("PDF table plugin could not load.");
+        return;
+    }
+
+    pdf.autoTable({
+        head: [headers.slice(0, 10)],
+        body: data.slice(0, 100).map(row => row.slice(0, 10)),
+        startY: 30,
+        styles: {
+            fontSize: 7,
+            cellPadding: 2
+        }
+    });
+
+    pdf.save("Excel_Data_Analyzer_Report.pdf");
+});
+
+// ============================================
+// DARK MODE
+// ============================================
+
+$("darkModeBtn").addEventListener("click", () => {
+    document.body.classList.toggle("dark-mode");
+
+    const isDark = document.body.classList.contains("dark-mode");
+
+    $("themeIcon").textContent = isDark ? "☀" : "☾";
+    $("themeLabel").textContent = isDark ? "Light mode" : "Dark mode";
+
+    drawCharts();
+});
+
+// ============================================
+// REFRESH EVERYTHING
+// ============================================
+
+function refresh() {
+    updateDropdowns();
+    displayTable();
+    analyzeData();
+    drawCharts();
+    updateUndoRedoButtons();
+}
+
+// ============================================
+// INITIAL PAGE LOAD
+// ============================================
+
+updateUndoRedoButtons();
+loadSampleData();
